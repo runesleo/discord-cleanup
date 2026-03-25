@@ -94,6 +94,10 @@ python discord_cleanup.py list --token "your_token_here"
 - [x-reader](https://github.com/runesleo/x-reader) — Universal content reader for 7+ platforms
 - [claude-code-workflow](https://github.com/runesleo/claude-code-workflow) — Battle-tested Claude Code workflow template
 
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=runesleo/discord-cleanup,runesleo/x-reader,runesleo/claude-code-workflow,runesleo/systematic-debugging-skill&type=Date)](https://star-history.com/#runesleo/discord-cleanup&runesleo/x-reader&runesleo/claude-code-workflow&runesleo/systematic-debugging-skill&Date)
+
 ## License
 
 MIT
