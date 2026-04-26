@@ -8,6 +8,8 @@ Batch leave Discord servers you no longer need. Zero dependencies, single file, 
 
 I had 166 Discord servers from the airdrop era — ZK, Arb, OP, Starknet, NFT, node, GameFi — with 30,000+ unread mentions. This script cleaned it down to 16 in under 2 minutes.
 
+**简体中文：** [README.zh-CN.md](./README.zh-CN.md)
+
 ## Quick Start
 
 ```bash
