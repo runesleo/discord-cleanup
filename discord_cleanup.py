@@ -14,7 +14,7 @@ Usage:
     python discord_cleanup.py leave <id1> <id2> ...   # Leave multiple servers
 
 Token:
-    Set DISCORD_TOKEN env var, or pass --token <token>
+    Set DISCORD_TOKEN env var, put it in .env, or pass --token <token>
 
     To get your token from Chrome DevTools:
     1. Open Discord in browser, press F12
@@ -25,6 +25,7 @@ Token:
 import argparse
 import json
 import os
+import ssl
 import sys
 import time
 import urllib.request
@@ -32,25 +33,67 @@ import urllib.error
 
 API_BASE = "https://discord.com/api/v10"
 RATE_LIMIT_PAUSE = 1.0  # seconds between leave requests
+ENV_FILE = os.path.join(os.path.dirname(__file__) or ".", ".env")
+REQUEST_FAILED = object()
+LEAVE_GUILD_DATA = {"lurking": False}
+NETWORK_RETRY_DELAY = 3
+NETWORK_RETRY_ATTEMPTS = 3
 
 
-def api_request(method, endpoint, token, data=None):
+def load_env_file(path=ENV_FILE):
+    """Load simple KEY=VALUE pairs from a local .env file."""
+    if not os.path.exists(path):
+        return
+
+    with open(path, encoding="utf-8") as env_file:
+        for raw_line in env_file:
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+
+            key, value = line.split("=", 1)
+            key = key.strip()
+            value = value.strip().strip("'\"")
+            if key and key not in os.environ:
+                os.environ[key] = value
+
+
+def configure_console_output():
+    """Avoid crashing when Windows console cannot encode server names or symbols."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure:
+            reconfigure(errors="replace")
+
+
+def build_https_opener():
+    """Use OS trust stores explicitly to avoid missing OpenSSL cafile paths on Windows."""
+    context = ssl.create_default_context()
+    context.load_default_certs()
+    return urllib.request.build_opener(urllib.request.HTTPSHandler(context=context))
+
+
+def api_request(method, endpoint, token, data=None, attempt=1, opener=None):
     """Make a Discord API request."""
     url = f"{API_BASE}{endpoint}"
     headers = {
         "Authorization": token,
-        "Content-Type": "application/json",
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
         "X-Discord-Locale": "en-US",
         "X-Discord-Timezone": "Asia/Shanghai",
     }
 
+    if data is not None:
+        headers["Content-Type"] = "application/json"
+
     req = urllib.request.Request(url, method=method, headers=headers)
-    if data:
-        req.data = json.dumps(data).encode()
+    if data is not None:
+        req.data = json.dumps(data).encode("utf-8")
+
+    request_opener = opener or build_https_opener()
 
     try:
-        with urllib.request.urlopen(req) as resp:
+        with request_opener.open(req) as resp:
             if resp.status == 204:
                 return None
             return json.loads(resp.read())
@@ -59,14 +102,21 @@ def api_request(method, endpoint, token, data=None):
             retry_after = json.loads(e.read()).get("retry_after", 5)
             print(f"  Rate limited, waiting {retry_after}s...")
             time.sleep(retry_after)
-            return api_request(method, endpoint, token, data)
+            return api_request(method, endpoint, token, data, attempt=attempt + 1, opener=request_opener)
         elif e.code == 401:
             print("Error: Invalid token. Please check your Discord token.")
             sys.exit(1)
         else:
             body = e.read().decode()
             print(f"Error {e.code}: {body}")
-            return None
+            return REQUEST_FAILED
+    except urllib.error.URLError as e:
+        if attempt < NETWORK_RETRY_ATTEMPTS:
+            print(f"  Network error: {e.reason}. Retrying in {NETWORK_RETRY_DELAY}s...")
+            time.sleep(NETWORK_RETRY_DELAY)
+            return api_request(method, endpoint, token, data, attempt=attempt + 1)
+        print(f"Error: network request failed after {NETWORK_RETRY_ATTEMPTS} attempts: {e}")
+        return REQUEST_FAILED
 
 
 def get_guilds(token):
@@ -80,7 +130,7 @@ def get_guilds(token):
             endpoint += f"&after={after}"
 
         batch = api_request("GET", endpoint, token)
-        if not batch:
+        if batch is REQUEST_FAILED or not batch:
             break
 
         guilds.extend(batch)
@@ -93,7 +143,10 @@ def get_guilds(token):
 
 def get_user_info(token):
     """Get current user info to verify token."""
-    return api_request("GET", "/users/@me", token)
+    user = api_request("GET", "/users/@me", token)
+    if user is REQUEST_FAILED:
+        return None
+    return user
 
 
 def categorize_guild(guild):
@@ -231,12 +284,15 @@ def cmd_cleanup(args, token):
 
     for g in to_leave:
         print(f"  Leaving {g['name']}...", end=" ", flush=True)
-        result = api_request("DELETE", f"/users/@me/guilds/{g['id']}", token)
+        result = api_request("DELETE", f"/users/@me/guilds/{g['id']}", token, data=LEAVE_GUILD_DATA)
         if result is None:  # 204 No Content = success
             print("✅")
             success += 1
+        elif result is REQUEST_FAILED:
+            print("failed")
+            failed += 1
         else:
-            print(f"❌ {result}")
+            print(f"unexpected response: {result}")
             failed += 1
         time.sleep(RATE_LIMIT_PAUSE)
 
@@ -264,21 +320,24 @@ def cmd_leave(args, token):
             continue
 
         print(f"  Leaving {g['name']}...", end=" ", flush=True)
-        result = api_request("DELETE", f"/users/@me/guilds/{sid}", token)
+        result = api_request("DELETE", f"/users/@me/guilds/{sid}", token, data=LEAVE_GUILD_DATA)
         if result is None:
             print("✅")
+        elif result is REQUEST_FAILED:
+            print("failed")
         else:
-            print(f"❌ {result}")
+            print(f"unexpected response: {result}")
         time.sleep(RATE_LIMIT_PAUSE)
 
 
 def main():
+    configure_console_output()
     parser = argparse.ArgumentParser(
         description="Discord Server Cleanup Tool",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
-    parser.add_argument("--token", help="Discord user token (or set DISCORD_TOKEN env)")
+    parser.add_argument("--token", help="Discord user token (or set DISCORD_TOKEN env / .env)")
 
     sub = parser.add_subparsers(dest="command")
 
@@ -300,11 +359,13 @@ def main():
         parser.print_help()
         sys.exit(0)
 
+    load_env_file()
+
     # Get token
     token = args.token or os.environ.get("DISCORD_TOKEN")
     if not token:
         print("Error: Discord token required.")
-        print("  Set DISCORD_TOKEN env var, or pass --token <token>")
+        print("  Set DISCORD_TOKEN env var, put it in .env, or pass --token <token>")
         print("\n  To get your token:")
         print("  1. Open Discord in browser, press F12")
         print("  2. Network tab → click any request to discord.com")
