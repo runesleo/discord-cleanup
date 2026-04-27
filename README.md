@@ -104,6 +104,12 @@ python discord_cleanup.py list --token "your_token_here"
 
 MIT
 
----
+## About the author
 
-Built by [@runes_leo](https://x.com/runes_leo) · [leolabs.me](https://leolabs.me)
+*Leo ([@runes_leo](https://x.com/runes_leo)) — AI × Crypto independent builder. Trading on [Polymarket](https://polymarket.com/?r=githuball&via=runes-leo&utm_source=github&utm_content=discord-cleanup), building data and trading systems with Claude Code and Codex.*
+
+[leolabs.me](https://leolabs.me) — writing · community · open-source tools · indie projects · all platforms.
+
+[X Subscription](https://x.com/runes_leo/creator-subscriptions/subscribe) — paid content weekly, or just buy me a coffee 😁
+
+*Learn in public, Build in public.*
